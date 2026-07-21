@@ -1268,8 +1268,13 @@ class AstBuilder extends DataTypeAstBuilder
   override def visitMergeIntoTable(ctx: MergeIntoTableContext): LogicalPlan = withOrigin(ctx) {
     val withSchemaEvolution = ctx.EVOLUTION() != null
 
+    // The target and source may each carry their own dynamic table options via `WITH (...)`.
+    // Known limitation: if the same table is used as both the target and the source
+    // (e.g. `MERGE INTO t WITH (a) USING t WITH (b) s`), the analyzer's relation cache is keyed
+    // without options and reuses the first resolved relation, so the target's options win and the
+    // source's are silently dropped.
     val sourceTableOrQuery = if (ctx.source != null) {
-      createUnresolvedRelation(ctx.source)
+      createUnresolvedRelation(ctx.source, Option(ctx.sourceOptions))
     } else if (ctx.sourceQuery != null) {
       visitQuery(ctx.sourceQuery)
     } else {
@@ -1355,6 +1360,7 @@ class AstBuilder extends DataTypeAstBuilder
 
     val targetTable = createUnresolvedRelation(
       ctx.target,
+      Option(ctx.targetOptions),
       writePrivileges = MergeIntoTable.getWritePrivileges(
         matchedActions, notMatchedActions, notMatchedBySourceActions))
     val targetTableAlias = getTableAliasWithoutColumnAlias(ctx.targetAlias, "MERGE")
@@ -2562,17 +2568,72 @@ class AstBuilder extends DataTypeAstBuilder
       case LessThan(left, right) => (left, LessThanOp, right)
       case _ =>
         throw QueryParsingErrors.sqlAsOfJoinMatchConditionInvalidOperator(
-          asOfMatchConditionInvalidOperatorText(expr), ctx)
+          asOfMatchConditionInvalidOperatorText(expr, ctx), ctx)
     }
   }
 
-  private def asOfMatchConditionInvalidOperatorText(expr: Expression): String = expr match {
-    case EqualTo(_, _) => "="
-    case Not(EqualTo(_, _)) => "<>"
-    case EqualNullSafe(_, _) => "<=>"
-    case And(_, _) => "AND"
-    case Or(_, _) => "OR"
-    case _ => expr.prettyName
+  /**
+   * Map a rejected MATCH_CONDITION expression back to the SQL operator the user wrote.
+   *
+   * Catalyst has no `NotEqualTo` class: both `<>` and `!=` parse to `Not(EqualTo(...))`, and
+   * both `<=>` and `IS NOT DISTINCT FROM` parse to `EqualNullSafe(...)`. Walk the match
+   * expression parse tree (not `prettyName`) to recover the token the user wrote.
+   */
+  private def asOfMatchConditionInvalidOperatorText(
+      expr: Expression,
+      ctx: ParserRuleContext): String = {
+    expr match {
+      case And(_, _) => "AND"
+      case Or(_, _) => "OR"
+      case _ =>
+        findFirstComparisonContext(ctx)
+          .map(comparisonOperatorText)
+          .orElse(findPredicatedContext(ctx).flatMap(distinctFromOperatorText))
+          .getOrElse(getOriginalText(ctx).trim)
+    }
+  }
+
+  private def findFirstComparisonContext(ctx: ParserRuleContext): Option[ComparisonContext] = {
+    ctx match {
+      case comparison: ComparisonContext => Some(comparison)
+      case _ =>
+        Option(ctx.children).iterator.flatMap(_.asScala).collectFirst {
+          case child: ParserRuleContext => findFirstComparisonContext(child)
+        }.flatten
+    }
+  }
+
+  private def findPredicatedContext(ctx: ParserRuleContext): Option[PredicatedContext] = {
+    ctx match {
+      case predicated: PredicatedContext => Some(predicated)
+      case _ =>
+        Option(ctx.children).iterator.flatMap(_.asScala).collectFirst {
+          case child: ParserRuleContext => findPredicatedContext(child)
+        }.flatten
+    }
+  }
+
+  private def comparisonOperatorText(ctx: ComparisonContext): String = {
+    val operator = ctx.comparisonOperator().getChild(0).asInstanceOf[TerminalNode]
+    operator.getSymbol.getType match {
+      case SqlBaseParser.EQ => "="
+      case SqlBaseParser.NSEQ => "<=>"
+      case SqlBaseParser.NEQ => "<>"
+      case SqlBaseParser.NEQJ => "!="
+      case SqlBaseParser.LT => "<"
+      case SqlBaseParser.LTE => "<="
+      case SqlBaseParser.GT => ">"
+      case SqlBaseParser.GTE => ">="
+      case _ => source(ctx.comparisonOperator())
+    }
+  }
+
+  private def distinctFromOperatorText(predicated: PredicatedContext): Option[String] = {
+    Option(predicated.predicate).flatMap { predicate =>
+      Option(predicate.kind).filter(_.getType == SqlBaseParser.DISTINCT).map { _ =>
+        if (predicate.errorCapturingNot != null) "IS NOT DISTINCT FROM" else "IS DISTINCT FROM"
+      }
+    }
   }
 
   /**
