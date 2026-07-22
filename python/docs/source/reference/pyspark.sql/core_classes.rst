@@ -39,8 +39,6 @@ Core Classes
     DataFrameWriter
     DataFrameWriterV2
     MergeIntoWriter
-    DataStreamReader
-    DataStreamWriter
     UDFRegistration
     UDTFRegistration
     udf.UserDefinedFunction
