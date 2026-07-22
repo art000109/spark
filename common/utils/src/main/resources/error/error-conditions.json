@@ -1064,6 +1064,12 @@
     ],
     "sqlState" : "0A000"
   },
+  "COLUMN_IS_NOT_VARIANT_TYPE" : {
+    "message" : [
+      "The semi-structured extraction operator (`:`) can only be applied to a column of the VARIANT type."
+    ],
+    "sqlState" : "42K09"
+  },
   "COLUMN_NOT_DEFINED_IN_TABLE" : {
     "message" : [
       "<colType> column <colName> is not defined in table <tableName>, defined table columns are: <tableCols>."
@@ -3241,6 +3247,12 @@
     ],
     "sqlState" : "0A000"
   },
+  "INSERT_REPLACE_ON_COLUMN_LIST_NOT_ALLOWED" : {
+    "message" : [
+      "A column list is not allowed with INSERT INTO ... REPLACE ON."
+    ],
+    "sqlState" : "42000"
+  },
   "INSERT_REPLACE_ON_NOT_ENABLED" : {
     "message" : [
       "INSERT INTO ... REPLACE ON is not enabled. Set 'spark.sql.insertIntoReplaceOn.enabled' to true to enable it."
@@ -3256,6 +3268,12 @@
   "INSERT_REPLACE_USING_NOT_ENABLED" : {
     "message" : [
       "INSERT INTO ... REPLACE USING is not enabled. Set 'spark.sql.insertIntoReplaceUsing.enabled' to true to enable it."
+    ],
+    "sqlState" : "0A000"
+  },
+  "INSERT_REPLACE_WHERE_COLUMN_LIST_NOT_ENABLED" : {
+    "message" : [
+      "INSERT INTO ... (column_list) REPLACE WHERE is not enabled. Set 'spark.sql.insertIntoReplaceWhereColumnList.enabled' to true to enable it."
     ],
     "sqlState" : "0A000"
   },
@@ -4581,6 +4599,16 @@
       "EXTENSION" : {
         "message" : [
           "Invalid extension: <invalidValue>. Extension is limited to exactly 3 letters (e.g. csv, tsv, etc...)"
+        ]
+      },
+      "HMAC_ALGORITHM" : {
+        "message" : [
+          "expects one of the algorithms 'SHA-224', 'SHA-256', 'SHA-384', 'SHA-512', 'SHA-1', 'MD5', but got <algorithm>."
+        ]
+      },
+      "HMAC_CRYPTO_ERROR" : {
+        "message" : [
+          "detail message: <detailMessage>"
         ]
       },
       "INTEGER" : {
@@ -7311,6 +7339,30 @@
     ],
     "sqlState" : "42K09"
   },
+  "STREAMING_ASYNC_OPERATION_FAILED" : {
+    "message" : [
+      "Asynchronous streaming operation failed with exception: <message>"
+    ],
+    "sqlState" : "XXKST"
+  },
+  "STREAMING_CHECKPOINT_LOG_WRITE_FAILURE" : {
+    "message" : [
+      "Failed to write a streaming query checkpoint log entry."
+    ],
+    "subClass" : {
+      "COMMIT_LOG" : {
+        "message" : [
+          "Failed to write commit log entry for batch <batchId> at checkpoint location <checkpointLocation>. Check that the checkpoint location is writable and retry the query."
+        ]
+      },
+      "OFFSET_LOG" : {
+        "message" : [
+          "Failed to write offset log entry for batch <batchId> at checkpoint location <checkpointLocation>. Check that the checkpoint location is writable and retry the query."
+        ]
+      }
+    },
+    "sqlState" : "58030"
+  },
   "STREAMING_CHECKPOINT_MISSING_METADATA_FILE" : {
     "message" : [
       "Checkpoint location <checkpointLocation> is in an inconsistent state: the metadata file is missing but offset and/or commit logs contain data. Please restore the metadata file or create a new checkpoint directory."
@@ -7416,9 +7468,9 @@
       "Streaming real-time mode has the following limitation:"
     ],
     "subClass" : {
-      "ASYNC_PROGRESS_TRACKING_NOT_SUPPORTED" : {
+      "ASYNC_PROGRESS_TRACKING_CHECKPOINTING_INTERVAL_NON_ZERO" : {
         "message" : [
-          "Async progress tracking is not supported in real-time mode. Set option asyncProgressTrackingEnabled to false and retry your query."
+          "The checkpointing interval for async progress tracking must be set to 0, which means each progress update is checkpointed. Set option asyncProgressTrackingCheckpointIntervalMs to 0 in DataStreamWriter options and retry your query."
         ]
       },
       "IDENTICAL_SOURCES_IN_UNION_NOT_SUPPORTED" : {
@@ -8773,6 +8825,11 @@
       "RAW_MAP" : {
         "message" : [
           "raw java.util.Map. Spark cannot infer the key and value types."
+        ]
+      },
+      "UNKNOWN_TYPE" : {
+        "message" : [
+          "<c>."
         ]
       },
       "WILDCARD" : {
@@ -11506,21 +11563,6 @@
   "_LEGACY_ERROR_TEMP_3089" : {
     "message" : [
       "Corrupted <typeName> in catalog: <numCols> parts expected, but part <index> is missing."
-    ]
-  },
-  "_LEGACY_ERROR_TEMP_3093" : {
-    "message" : [
-      "Unsupported java type <c>"
-    ]
-  },
-  "_LEGACY_ERROR_TEMP_3094" : {
-    "message" : [
-      "<dt> is not supported."
-    ]
-  },
-  "_LEGACY_ERROR_TEMP_3095" : {
-    "message" : [
-      "<dt> cannot be converted to Hive TypeInfo"
     ]
   },
   "_LEGACY_ERROR_TEMP_3096" : {

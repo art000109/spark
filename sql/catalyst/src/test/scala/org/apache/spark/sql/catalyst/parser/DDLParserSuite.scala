@@ -1846,23 +1846,30 @@ class DDLParserSuite extends AnalysisTest {
   test("insert table: REPLACE WHERE with BY NAME") {
     parseCompare(
       "INSERT INTO testcat.ns1.ns2.tbl BY NAME REPLACE WHERE a > 5 SELECT * FROM source",
-      OverwriteByExpression.byName(
-        UnresolvedRelation(Seq("testcat", "ns1", "ns2", "tbl")),
-        Project(Seq(UnresolvedStar(None)), UnresolvedRelation(Seq("source"))),
-        GreaterThan(
-          UnresolvedAttribute("a"),
-          Literal(5))))
+      InsertIntoStatement(
+        table = UnresolvedRelation(Seq("testcat", "ns1", "ns2", "tbl")),
+        partitionSpec = Map.empty,
+        userSpecifiedCols = Nil,
+        query = Project(Seq(UnresolvedStar(None)), UnresolvedRelation(Seq("source"))),
+        overwrite = true,
+        ifPartitionNotExists = false,
+        byName = true,
+        replaceCriteriaOpt = Some(InsertReplaceWhere(
+          GreaterThan(UnresolvedAttribute("a"), Literal(5))))))
   }
 
   test("insert table: REPLACE WHERE without BY NAME") {
     parseCompare(
       "INSERT INTO testcat.ns1.ns2.tbl REPLACE WHERE a > 5 SELECT * FROM source",
-      OverwriteByExpression.byPosition(
-        UnresolvedRelation(Seq("testcat", "ns1", "ns2", "tbl")),
-        Project(Seq(UnresolvedStar(None)), UnresolvedRelation(Seq("source"))),
-        GreaterThan(
-          UnresolvedAttribute("a"),
-          Literal(5))))
+      InsertIntoStatement(
+        table = UnresolvedRelation(Seq("testcat", "ns1", "ns2", "tbl")),
+        partitionSpec = Map.empty,
+        userSpecifiedCols = Nil,
+        query = Project(Seq(UnresolvedStar(None)), UnresolvedRelation(Seq("source"))),
+        overwrite = true,
+        ifPartitionNotExists = false,
+        replaceCriteriaOpt = Some(InsertReplaceWhere(
+          GreaterThan(UnresolvedAttribute("a"), Literal(5))))))
   }
 
   test("insert table: REPLACE WHERE rejects tableAlias with BY NAME") {
@@ -1887,6 +1894,99 @@ class DDLParserSuite extends AnalysisTest {
       context = ExpectedContext(
         fragment = "INSERT INTO testcat.ns1.ns2.tbl AS t REPLACE WHERE a > 5",
         start = 0, stop = 55))
+  }
+
+  test("insert table: REPLACE WHERE rejects tableAlias with column list") {
+    checkError(
+      exception = parseException(
+        "INSERT INTO testcat.ns1.ns2.tbl AS t (a, b) REPLACE WHERE a > 5 SELECT * FROM source"),
+      condition = "INSERT_REPLACE_WHERE_TABLE_ALIAS_NOT_ALLOWED",
+      parameters = Map.empty,
+      context = ExpectedContext(
+        fragment = "INSERT INTO testcat.ns1.ns2.tbl AS t (a, b) REPLACE WHERE a > 5",
+        start = 0, stop = 62))
+  }
+
+  test("insert table: REPLACE WHERE with column list") {
+    parseCompare(
+      "INSERT INTO testcat.ns1.ns2.tbl (a, b) REPLACE WHERE a > 5 SELECT * FROM source",
+      InsertIntoStatement(
+        table = UnresolvedRelation(Seq("testcat", "ns1", "ns2", "tbl")),
+        partitionSpec = Map.empty,
+        userSpecifiedCols = Seq("a", "b"),
+        query = Project(Seq(UnresolvedStar(None)), UnresolvedRelation(Seq("source"))),
+        overwrite = true,
+        ifPartitionNotExists = false,
+        replaceCriteriaOpt = Some(InsertReplaceWhere(
+          GreaterThan(UnresolvedAttribute("a"), Literal(5))))))
+  }
+
+  test("insert table: REPLACE WHERE rejects BY NAME with column list") {
+    checkError(
+      exception = parseException(
+        "INSERT INTO testcat.ns1.ns2.tbl BY NAME (a, b) REPLACE WHERE a > 5 SELECT * FROM source"),
+      condition = "PARSE_SYNTAX_ERROR",
+      parameters = Map("error" -> "'a'", "hint" -> ""))
+
+    checkError(
+      exception = parseException(
+        "INSERT INTO testcat.ns1.ns2.tbl (a, b) BY NAME REPLACE WHERE a > 5 SELECT * FROM source"),
+      condition = "PARSE_SYNTAX_ERROR",
+      parameters = Map("error" -> "'BY'", "hint" -> ""))
+  }
+
+  test("insert table: REPLACE WHERE rejects column list when the feature flag is disabled") {
+    withSQLConf(SQLConf.INSERT_INTO_REPLACE_WHERE_COLUMN_LIST_ENABLED.key -> "false") {
+      checkError(
+        exception = parseException(
+          "INSERT INTO testcat.ns1.ns2.tbl (a, b) REPLACE WHERE a > 5 SELECT * FROM source"),
+        condition = "INSERT_REPLACE_WHERE_COLUMN_LIST_NOT_ENABLED",
+        parameters = Map.empty,
+        context = ExpectedContext(
+          fragment = "INSERT INTO testcat.ns1.ns2.tbl (a, b) REPLACE WHERE a > 5",
+          start = 0,
+          stop = 57))
+    }
+  }
+
+  test("insert table: REPLACE WHERE rejects empty column list") {
+    checkError(
+      exception = parseException(
+        "INSERT INTO testcat.ns1.ns2.tbl () REPLACE WHERE a > 5 SELECT * FROM source"),
+      condition = "PARSE_SYNTAX_ERROR",
+      parameters = Map("error" -> "')'", "hint" -> ""))
+  }
+
+  test("insert table: INSERT WITH SCHEMA EVOLUTION INTO ... (cols) REPLACE WHERE") {
+    parseCompare(
+      "INSERT WITH SCHEMA EVOLUTION INTO testcat.ns1.ns2.tbl (a, b) " +
+        "REPLACE WHERE a > 5 SELECT * FROM source",
+      InsertIntoStatement(
+        table = UnresolvedRelation(Seq("testcat", "ns1", "ns2", "tbl")),
+        partitionSpec = Map.empty,
+        userSpecifiedCols = Seq("a", "b"),
+        query = Project(Seq(UnresolvedStar(None)), UnresolvedRelation(Seq("source"))),
+        overwrite = true,
+        ifPartitionNotExists = false,
+        replaceCriteriaOpt = Some(InsertReplaceWhere(
+          GreaterThan(UnresolvedAttribute("a"), Literal(5)))),
+        withSchemaEvolution = true))
+  }
+
+  test("insert table: REPLACE WHERE with column list and options") {
+    val opts = new CaseInsensitiveStringMap(java.util.Map.of("key", "value"))
+    parseCompare(
+      "INSERT INTO testcat.ns1.ns2.tbl WITH (key = 'value') (a, b) " +
+        "REPLACE WHERE a > 5 SELECT * FROM source",
+      InsertIntoStatement(
+        table = UnresolvedRelation(Seq("testcat", "ns1", "ns2", "tbl"), opts),
+        partitionSpec = Map.empty,
+        userSpecifiedCols = Seq("a", "b"),
+        query = Project(Seq(UnresolvedStar(None)), UnresolvedRelation(Seq("source"))),
+        overwrite = true,
+        ifPartitionNotExists = false,
+        replaceCriteriaOpt = Some(InsertReplaceWhere(
+          GreaterThan(UnresolvedAttribute("a"), Literal(5))))))
   }
 
   for {
@@ -2082,6 +2182,18 @@ class DDLParserSuite extends AnalysisTest {
     )
   }
 
+  test("insert table: REPLACE ON rejects a column list") {
+    checkError(
+      exception = parseException(
+        "INSERT INTO testcat.ns1.ns2.tbl (a, b) REPLACE ON col1 = col2 SELECT * FROM source"),
+      condition = "INSERT_REPLACE_ON_COLUMN_LIST_NOT_ALLOWED",
+      parameters = Map.empty,
+      context = ExpectedContext(
+        fragment = "INSERT INTO testcat.ns1.ns2.tbl (a, b) REPLACE ON col1 = col2",
+        start = 0,
+        stop = 60))
+  }
+
   test("INSERT INTO REPLACE ON with source query alias") {
     val table = "testcat.ns1.ns2.tbl"
     parseCompare(
@@ -2136,12 +2248,15 @@ class DDLParserSuite extends AnalysisTest {
         """INSERT INTO testcat.ns1.ns2.tbl
           |REPLACE WHERE a > 5
           |(SELECT * FROM source) AS s""".stripMargin,
-      expected = OverwriteByExpression.byPosition(
-        UnresolvedRelation(Seq("testcat", "ns1", "ns2", "tbl")),
-        Project(Seq(UnresolvedStar(None)), UnresolvedRelation(Seq("source"))),
-        GreaterThan(
-          UnresolvedAttribute("a"),
-          Literal(5))))
+      expected = InsertIntoStatement(
+        table = UnresolvedRelation(Seq("testcat", "ns1", "ns2", "tbl")),
+        partitionSpec = Map.empty,
+        userSpecifiedCols = Nil,
+        query = Project(Seq(UnresolvedStar(None)), UnresolvedRelation(Seq("source"))),
+        overwrite = true,
+        ifPartitionNotExists = false,
+        replaceCriteriaOpt = Some(InsertReplaceWhere(
+          GreaterThan(UnresolvedAttribute("a"), Literal(5))))))
   }
 
   test("INSERT INTO REPLACE ON with compound condition") {
@@ -2314,6 +2429,55 @@ class DDLParserSuite extends AnalysisTest {
         Seq(DeleteAction(Some(EqualTo(UnresolvedAttribute("target.col3"), Literal("delete")))),
           UpdateAction(Some(EqualTo(UnresolvedAttribute("target.col3"), Literal("update"))),
             Seq(Assignment(UnresolvedAttribute("target.col3"), Literal("delete"))))),
+        withSchemaEvolution = false))
+  }
+
+  test("SPARK-58007: merge into table: with target and source options") {
+    parseCompare(
+      """
+        |MERGE INTO testcat1.ns1.ns2.tbl AS target WITH (`write.split-size` = 10)
+        |USING testcat2.ns1.ns2.tbl WITH (`split-size` = 5) AS source
+        |ON target.col1 = source.col1
+        |WHEN MATCHED THEN UPDATE SET target.col2 = source.col2
+        |WHEN NOT MATCHED THEN INSERT (target.col1, target.col2) values (source.col1, source.col2)
+      """.stripMargin,
+      MergeIntoTable(
+        SubqueryAlias("target",
+          UnresolvedRelation(Seq("testcat1", "ns1", "ns2", "tbl"),
+            new CaseInsensitiveStringMap(java.util.Map.of("write.split-size", "10")))),
+        SubqueryAlias("source",
+          UnresolvedRelation(Seq("testcat2", "ns1", "ns2", "tbl"),
+            new CaseInsensitiveStringMap(java.util.Map.of("split-size", "5")))),
+        EqualTo(UnresolvedAttribute("target.col1"), UnresolvedAttribute("source.col1")),
+        Seq(UpdateAction(None,
+          Seq(Assignment(UnresolvedAttribute("target.col2"),
+            UnresolvedAttribute("source.col2"))))),
+        Seq(InsertAction(None,
+          Seq(Assignment(UnresolvedAttribute("target.col1"), UnresolvedAttribute("source.col1")),
+            Assignment(UnresolvedAttribute("target.col2"), UnresolvedAttribute("source.col2"))))),
+        Seq.empty,
+        withSchemaEvolution = false))
+  }
+
+  test("SPARK-58007: merge into table: with target options only") {
+    parseCompare(
+      """
+        |MERGE INTO testcat1.ns1.ns2.tbl AS target WITH (`k` = 'v')
+        |USING testcat2.ns1.ns2.tbl AS source
+        |ON target.col1 = source.col1
+        |WHEN MATCHED THEN UPDATE SET target.col2 = source.col2
+      """.stripMargin,
+      MergeIntoTable(
+        SubqueryAlias("target",
+          UnresolvedRelation(Seq("testcat1", "ns1", "ns2", "tbl"),
+            new CaseInsensitiveStringMap(java.util.Map.of("k", "v")))),
+        SubqueryAlias("source", UnresolvedRelation(Seq("testcat2", "ns1", "ns2", "tbl"))),
+        EqualTo(UnresolvedAttribute("target.col1"), UnresolvedAttribute("source.col1")),
+        Seq(UpdateAction(None,
+          Seq(Assignment(UnresolvedAttribute("target.col2"),
+            UnresolvedAttribute("source.col2"))))),
+        Seq.empty,
+        Seq.empty,
         withSchemaEvolution = false))
   }
 
